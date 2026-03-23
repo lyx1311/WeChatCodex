@@ -242,6 +242,15 @@ async function sendToCodex(
       const imagePath = await downloadImageToTemp(imageItem);
       if (imagePath) {
         tempFiles.push(imagePath);
+      } else {
+        session.state = 'idle';
+        sessionStore.save(account.accountId, session);
+        await sender.sendText(
+          fromUserId,
+          contextToken,
+          '⚠️ 图片已收到，但下载或解密失败。请重发一次图片；如果还失败，我会继续按日志排查。',
+        );
+        return;
       }
     }
 

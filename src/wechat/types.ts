@@ -37,7 +37,10 @@ export interface TextItem {
 }
 
 export interface ImageItem {
-  cdn_media: CDNMedia;
+  cdn_media?: CDNMedia;
+  media?: CDNMedia;
+  url?: string;
+  aeskey?: string;
 }
 
 export interface VoiceItem {

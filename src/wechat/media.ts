@@ -2,7 +2,7 @@ import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { MessageItem } from './types.js';
-import { MessageItemType } from './types.js';
+import { MessageItemType, type CDNMedia } from './types.js';
 import { downloadAndDecrypt } from './cdn.js';
 import { logger } from '../logger.js';
 import { TMP_DIR } from '../constants.js';
@@ -36,7 +36,7 @@ function extensionForMimeType(mimeType: string): string {
  * `codex --image`.
  */
 export async function downloadImageToTemp(item: MessageItem): Promise<string | null> {
-  const cdnMedia = item.image_item?.cdn_media;
+  const cdnMedia = extractImageCdnMedia(item);
   if (!cdnMedia) {
     return null;
   }
@@ -72,6 +72,10 @@ export function cleanupTempFiles(filePaths: string[]): void {
  */
 export function extractText(item: MessageItem): string {
   return item.text_item?.text ?? '';
+}
+
+export function extractImageCdnMedia(item: MessageItem): CDNMedia | undefined {
+  return item.image_item?.cdn_media ?? item.image_item?.media;
 }
 
 /**
