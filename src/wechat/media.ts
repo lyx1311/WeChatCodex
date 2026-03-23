@@ -42,7 +42,14 @@ export async function downloadImageToTemp(item: MessageItem): Promise<string | n
   }
 
   try {
-    const decrypted = await downloadAndDecrypt(cdnMedia.encrypt_query_param, cdnMedia.aes_key);
+    const encryptQueryParam = cdnMedia.encrypt_query_param;
+    const aesKeyBase64 = extractImageAesKeyBase64(item);
+    if (!encryptQueryParam || !aesKeyBase64) {
+      logger.warn('Image payload missing CDN download fields');
+      return null;
+    }
+
+    const decrypted = await downloadAndDecrypt(encryptQueryParam, aesKeyBase64);
     const mimeType = detectMimeType(decrypted);
     mkdirSync(TMP_DIR, { recursive: true });
     const filePath = join(TMP_DIR, `${randomUUID()}${extensionForMimeType(mimeType)}`);
@@ -76,6 +83,14 @@ export function extractText(item: MessageItem): string {
 
 export function extractImageCdnMedia(item: MessageItem): CDNMedia | undefined {
   return item.image_item?.cdn_media ?? item.image_item?.media;
+}
+
+export function extractImageAesKeyBase64(item: MessageItem): string | undefined {
+  const hexKey = item.image_item?.aeskey;
+  if (hexKey) {
+    return Buffer.from(hexKey, 'hex').toString('base64');
+  }
+  return extractImageCdnMedia(item)?.aes_key;
 }
 
 /**
