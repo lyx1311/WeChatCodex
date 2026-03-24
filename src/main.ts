@@ -9,7 +9,7 @@ import { loadLatestAccount, type AccountData } from './wechat/accounts.js';
 import { startQrLogin, waitForQrScan } from './wechat/login.js';
 import { createMonitor, type MonitorCallbacks } from './wechat/monitor.js';
 import { createSender } from './wechat/send.js';
-import { cleanupTempFiles, downloadImageToTemp, extractText, extractFirstImageUrl } from './wechat/media.js';
+import { buildCodexPrompt, cleanupTempFiles, extractFirstSupportedMedia, extractText, prepareMediaForCodex } from './wechat/media.js';
 import { createSessionStore, type Session } from './session.js';
 import { routeCommand, type CommandContext, type CommandResult } from './commands/router.js';
 import { runCodex } from './codex/bridge.js';
@@ -176,7 +176,7 @@ async function handleMessage(
   const contextToken = msg.context_token ?? '';
   const fromUserId = msg.from_user_id;
   const userText = extractTextFromItems(msg.item_list);
-  const imageItem = extractFirstImageUrl(msg.item_list);
+  const media = extractFirstSupportedMedia(msg.item_list);
 
   if (session.state === 'processing') {
     if (!userText.startsWith('/status') && !userText.startsWith('/help')) {
@@ -205,7 +205,7 @@ async function handleMessage(
       return;
     }
     if (result.codexPrompt) {
-      void sendToCodex(result.codexPrompt, imageItem, fromUserId, contextToken, account, session, sessionStore, sender, config);
+      void sendToCodex(result.codexPrompt, media, fromUserId, contextToken, account, session, sessionStore, sender, config);
       return;
     }
     if (result.handled) {
@@ -213,17 +213,17 @@ async function handleMessage(
     }
   }
 
-  if (!userText && !imageItem) {
-    await sender.sendText(fromUserId, contextToken, '暂不支持此类型消息，请发送文字或图片');
+  if (!userText && !media) {
+    await sender.sendText(fromUserId, contextToken, '暂不支持此类型消息，请发送文字、图片、语音、音频或视频');
     return;
   }
 
-  void sendToCodex(userText || '请分析这张图片', imageItem, fromUserId, contextToken, account, session, sessionStore, sender, config);
+  void sendToCodex(userText, media, fromUserId, contextToken, account, session, sessionStore, sender, config);
 }
 
 async function sendToCodex(
-  prompt: string,
-  imageItem: ReturnType<typeof extractFirstImageUrl>,
+  userText: string,
+  media: ReturnType<typeof extractFirstSupportedMedia>,
   fromUserId: string,
   contextToken: string,
   account: AccountData,
@@ -236,22 +236,30 @@ async function sendToCodex(
   sessionStore.save(account.accountId, session);
 
   const tempFiles: string[] = [];
+  let prompt = userText.trim();
+  let imagePaths: string[] = [];
 
   try {
-    if (imageItem) {
-      const imagePath = await downloadImageToTemp(imageItem);
-      if (imagePath) {
-        tempFiles.push(imagePath);
-      } else {
+    if (media) {
+      const preparedMedia = await prepareMediaForCodex(media);
+      tempFiles.push(...preparedMedia.tempFiles);
+
+      if (preparedMedia.immediateReply) {
         session.state = 'idle';
         sessionStore.save(account.accountId, session);
-        await sender.sendText(
-          fromUserId,
-          contextToken,
-          '⚠️ 图片已收到，但下载或解密失败。请重发一次图片；如果还失败，我会继续按日志排查。',
-        );
+        await sender.sendText(fromUserId, contextToken, preparedMedia.immediateReply);
         return;
       }
+
+      prompt = buildCodexPrompt(userText, preparedMedia);
+      imagePaths = preparedMedia.imagePaths;
+    }
+
+    if (!prompt) {
+      session.state = 'idle';
+      sessionStore.save(account.accountId, session);
+      await sender.sendText(fromUserId, contextToken, '⚠️ 未提取到可发送给 Codex 的内容，请重试。');
+      return;
     }
 
     const cwd = session.workingDirectory || config.workingDirectory;
@@ -264,7 +272,7 @@ async function sendToCodex(
       threadId: session.threadId,
       model: session.model ?? config.model,
       mode,
-      images: tempFiles,
+      images: imagePaths,
     });
 
     session.threadId = result.threadId ?? session.threadId;

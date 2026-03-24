@@ -44,17 +44,34 @@ export interface ImageItem {
 }
 
 export interface VoiceItem {
-  cdn_media: CDNMedia;
+  cdn_media?: CDNMedia;
+  media?: CDNMedia;
+  text?: string;
   voice_text?: string;
+  encode_type?: number;
+  bits_per_sample?: number;
+  sample_rate?: number;
+  playtime?: number;
 }
 
 export interface FileItem {
-  cdn_media: CDNMedia;
+  cdn_media?: CDNMedia;
+  media?: CDNMedia;
   file_name?: string;
+  md5?: string;
+  len?: string;
 }
 
 export interface VideoItem {
-  cdn_media: CDNMedia;
+  cdn_media?: CDNMedia;
+  media?: CDNMedia;
+  thumb_media?: CDNMedia;
+  video_size?: number;
+  play_length?: number;
+  video_md5?: string;
+  thumb_size?: number;
+  thumb_height?: number;
+  thumb_width?: number;
 }
 
 export interface MessageItem {
