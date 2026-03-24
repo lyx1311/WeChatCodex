@@ -15,9 +15,19 @@ import { routeCommand, type CommandContext, type CommandResult } from './command
 import { runCodex } from './codex/bridge.js';
 import { loadConfig, saveConfig } from './config.js';
 import { logger } from './logger.js';
+import { dequeueQueuedMessage, enqueueQueuedMessage } from './message-queue.js';
 import { DATA_DIR } from './constants.js';
 import { splitMessage } from './utils/chunk.js';
 import { MessageType, type WeixinMessage } from './wechat/types.js';
+
+interface QueuedCodexMessage {
+  userText: string;
+  media: ReturnType<typeof extractFirstSupportedMedia>;
+  fromUserId: string;
+  contextToken: string;
+}
+
+const queuedMessages = new Map<string, QueuedCodexMessage[]>();
 
 function promptUser(question: string, defaultValue?: string): Promise<string> {
   if (!process.stdin.isTTY) {
@@ -177,15 +187,30 @@ async function handleMessage(
   const fromUserId = msg.from_user_id;
   const userText = extractTextFromItems(msg.item_list);
   const media = extractFirstSupportedMedia(msg.item_list);
+  const isSlashCommand = userText.startsWith('/');
 
   if (session.state === 'processing') {
     if (!userText.startsWith('/status') && !userText.startsWith('/help')) {
+      if (!isSlashCommand && (userText || media)) {
+        const queueLength = enqueueQueuedMessage(queuedMessages, account.accountId, {
+          userText,
+          media,
+          fromUserId,
+          contextToken,
+        });
+        await sender.sendText(
+          fromUserId,
+          contextToken,
+          `⏳ 正在处理上一条消息，这条已加入队列（前面还有 ${queueLength} 条）。处理完会自动继续，无需重发。`,
+        );
+        return;
+      }
       await sender.sendText(fromUserId, contextToken, '⏳ 正在处理上一条消息，请稍后...');
       return;
     }
   }
 
-  if (userText.startsWith('/')) {
+  if (isSlashCommand) {
     const updateSession = (partial: Partial<Session>) => {
       Object.assign(session, partial);
       sessionStore.save(account.accountId, session);
@@ -307,6 +332,23 @@ async function sendToCodex(
     await sender.sendText(fromUserId, contextToken, `⚠️ 处理消息时出错\n${errorMsg.slice(0, 1200)}`);
   } finally {
     cleanupTempFiles(tempFiles);
+    if (session.state === 'idle') {
+      const nextQueuedMessage = dequeueQueuedMessage(queuedMessages, account.accountId);
+      if (nextQueuedMessage) {
+        logger.info('Processing queued WeChat message', { accountId: account.accountId });
+        void sendToCodex(
+          nextQueuedMessage.userText,
+          nextQueuedMessage.media,
+          nextQueuedMessage.fromUserId,
+          nextQueuedMessage.contextToken,
+          account,
+          session,
+          sessionStore,
+          sender,
+          config,
+        );
+      }
+    }
   }
 }
 
