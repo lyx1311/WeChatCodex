@@ -35,7 +35,7 @@ export interface MediaPreparationDeps {
   probeMedia: (filePath: string) => Promise<MediaProbeResult>;
   extractAudioForTranscription: (filePath: string, maxDurationSeconds?: number) => Promise<string>;
   extractVideoPreviewImage: (filePath: string) => Promise<string>;
-  transcribeAudio: (filePath: string) => Promise<string>;
+  transcribeAudio: (filePath: string, durationSeconds?: number) => Promise<string>;
 }
 
 const defaultMediaPreparationDeps: MediaPreparationDeps = {
@@ -280,7 +280,7 @@ async function prepareAudioForCodex(
     const extractedAudioPath = await deps.extractAudioForTranscription(mediaPath, MEDIA_MAX_DURATION_SECONDS);
     prepared.tempFiles.push(extractedAudioPath);
 
-    const transcript = trimTranscript(await deps.transcribeAudio(extractedAudioPath));
+    const transcript = trimTranscript(await deps.transcribeAudio(extractedAudioPath, probe.durationSeconds));
     if (!transcript) {
       prepared.immediateReply = '⚠️ 音频已收到，但没有识别出可用语音内容。请换一段更清晰的音频再试。';
       return prepared;
@@ -336,7 +336,7 @@ async function prepareVideoForCodex(
         try {
           const extractedAudioPath = await deps.extractAudioForTranscription(mediaPath, MEDIA_MAX_DURATION_SECONDS);
           prepared.tempFiles.push(extractedAudioPath);
-          const transcript = trimTranscript(await deps.transcribeAudio(extractedAudioPath));
+          const transcript = trimTranscript(await deps.transcribeAudio(extractedAudioPath, probe.durationSeconds));
           if (transcript) {
             prepared.promptFragments.push(`视频语音转写：\n${transcript}`);
           } else {

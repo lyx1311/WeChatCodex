@@ -29,6 +29,11 @@ interface FfprobePayload {
   format?: FfprobeFormat;
 }
 
+export function calculateTranscriptionTimeoutMs(durationSeconds: number): number {
+  const scaledTimeoutMs = Math.ceil(durationSeconds) * 2_000 + 60_000;
+  return Math.max(MEDIA_TOOL_TIMEOUT_MS, scaledTimeoutMs);
+}
+
 async function runCommand(command: string, args: string[], timeoutMs = MEDIA_TOOL_TIMEOUT_MS): Promise<CommandResult> {
   return new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -151,27 +156,32 @@ export async function extractVideoPreviewImage(inputPath: string): Promise<strin
   return outputPath;
 }
 
-export async function transcribeAudio(filePath: string): Promise<string> {
+export async function transcribeAudio(filePath: string, durationSeconds = 0): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
   const outputDir = mkdtempSync(join(TMP_DIR, 'whisper-'));
   const outputBaseName = parse(basename(filePath)).name;
+  const timeoutMs = calculateTranscriptionTimeoutMs(durationSeconds);
 
   try {
-    await runCommand('whisper', [
-      '--model',
-      'turbo',
-      '--language',
-      'zh',
-      '--task',
-      'transcribe',
-      '--output_format',
-      'txt',
-      '--output_dir',
-      outputDir,
-      '--verbose',
-      'False',
-      filePath,
-    ]);
+    await runCommand(
+      'whisper',
+      [
+        '--model',
+        'turbo',
+        '--language',
+        'zh',
+        '--task',
+        'transcribe',
+        '--output_format',
+        'txt',
+        '--output_dir',
+        outputDir,
+        '--verbose',
+        'False',
+        filePath,
+      ],
+      timeoutMs,
+    );
 
     const transcriptPath = join(outputDir, `${outputBaseName}.txt`);
     return readFileSync(transcriptPath, 'utf8').trim();
