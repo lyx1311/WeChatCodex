@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 import { basename, join, parse } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { MEDIA_MAX_DURATION_SECONDS, MEDIA_TOOL_TIMEOUT_MS, TMP_DIR } from '../constants.js';
+import { spawnCommand, terminateProcessTree } from '../utils/process.js';
 
 export interface MediaProbeResult {
   durationSeconds: number;
@@ -36,7 +36,7 @@ export function calculateTranscriptionTimeoutMs(durationSeconds: number): number
 
 async function runCommand(command: string, args: string[], timeoutMs = MEDIA_TOOL_TIMEOUT_MS): Promise<CommandResult> {
   return new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnCommand(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -47,19 +47,19 @@ async function runCommand(command: string, args: string[], timeoutMs = MEDIA_TOO
     const timer = setTimeout(() => {
       if (settled) return;
       stderr += `${command} timed out after ${timeoutMs}ms`;
-      child.kill('SIGTERM');
+      terminateProcessTree(child, 'SIGTERM');
       setTimeout(() => {
         if (!settled) {
-          child.kill('SIGKILL');
+          terminateProcessTree(child, 'SIGKILL');
         }
       }, 3000);
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout!.on('data', (chunk) => {
       stdout += chunk.toString();
     });
 
-    child.stderr.on('data', (chunk) => {
+    child.stderr!.on('data', (chunk) => {
       stderr += chunk.toString();
     });
 

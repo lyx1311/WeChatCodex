@@ -22,7 +22,7 @@
 - 支持微信语音消息，优先使用微信侧转写文本
 - 支持音频文件和视频消息，自动做本地转写；视频会额外抽取关键帧给 Codex
 - 支持 slash 命令管理模型、工作目录、运行模式和会话状态
-- 守护进程常驻运行，macOS 使用 `launchd`，Linux 提供 `systemd` / `nohup` 路径
+- 守护进程常驻运行，macOS 使用 `launchd`，Linux 提供 `systemd` / `nohup` 路径，Windows 使用后台进程和 PID 文件
 - 本地持久化账号、配置、日志和会话
 - 项目过程文档按 Superpowers 工作流保存在 `docs/superpowers/`
 
@@ -46,10 +46,12 @@
 ## 前置条件
 
 - Node.js 18+
-- macOS 或 Linux
+- macOS、Linux 或 Windows 10/11
 - 本机已安装并完成登录的 `codex`
 - 如需处理音频或视频，需额外安装 `ffmpeg`、`ffprobe` 和 `whisper`
 - 已开通并可使用的个人微信账号
+
+Windows 用户需要使用原生 Node.js 和 PowerShell，并确保 `codex` 以及可选媒体工具已加入 `PATH`。不要求安装 WSL 或 Git Bash。
 
 ## 安装
 
@@ -76,6 +78,8 @@ npm run daemon -- restart
 npm run daemon -- stop
 npm run daemon -- logs
 ```
+
+Windows 后台进程不注册系统服务，也不会在开机后自动启动；重启电脑后需要重新运行 `npm run daemon -- start`。
 
 ## 微信命令
 
@@ -108,6 +112,7 @@ npm run daemon -- logs
 
 - 主要在 macOS 上完成了实际扫码、收发消息和守护进程验证
 - Linux 路径已提供脚本支持，欢迎补充验证反馈
+- Windows 已支持扫码、Codex/媒体工具调用以及守护进程启停、状态和日志管理
 - 已修复守护进程被长时间 `codex exec resume` 阻塞后无法继续轮询的问题
 - 音频自动转写默认只处理 10 分钟内的音频/视频，超出会明确提示截短后重发
 

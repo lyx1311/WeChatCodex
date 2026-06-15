@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
 import type { ExecutionMode } from '../session.js';
 import { parseCodexOutput, type CodexCommandExecution, type CodexFileChange } from './events.js';
 import { CODEX_RUN_TIMEOUT_MS } from '../constants.js';
+import { spawnCommand, terminateProcessTree } from '../utils/process.js';
 
 export interface CodexRunOptions {
   prompt: string;
@@ -55,7 +55,7 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
   const args = buildCodexArgs(options);
 
   return new Promise<CodexRunResult>((resolve, reject) => {
-    const child = spawn('codex', args, {
+    const child = spawnCommand('codex', args, {
       cwd: options.cwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -68,19 +68,19 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
     const timer = setTimeout(() => {
       if (settled) return;
       stderr += `Codex timed out after ${CODEX_RUN_TIMEOUT_MS}ms`;
-      child.kill('SIGTERM');
+      terminateProcessTree(child, 'SIGTERM');
       setTimeout(() => {
         if (!settled) {
-          child.kill('SIGKILL');
+          terminateProcessTree(child, 'SIGKILL');
         }
       }, 3000);
     }, CODEX_RUN_TIMEOUT_MS);
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout!.on('data', (chunk) => {
       stdout += chunk.toString();
     });
 
-    child.stderr.on('data', (chunk) => {
+    child.stderr!.on('data', (chunk) => {
       stderr += chunk.toString();
     });
 
