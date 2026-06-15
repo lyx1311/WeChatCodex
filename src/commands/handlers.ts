@@ -3,7 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { scanAllSkills, findSkill, type SkillInfo } from '../codex/skill-scanner.js';
-import { sessionsForDirectory, type CodexSessionInfo } from '../codex/sessions.js';
+import { formatConversationContext, readRecentConversationTurns, sessionsForDirectory, type CodexSessionInfo } from '../codex/sessions.js';
 
 const HELP_TEXT = `可用命令：
 
@@ -215,8 +215,9 @@ export function handleResume(ctx: CommandContext, args: string): CommandResult {
 
   ctx.updateSession({ threadId: selected.id });
   const name = cleanSessionName(selected.name);
+  const context = formatConversationContext(readRecentConversationTurns(selected));
   return {
-    reply: `已接入 Codex 会话${name ? `: ${name}` : ''}\n线程ID: ${selected.id}\n下一条普通消息将继续该会话。`,
+    reply: `已接入 Codex 会话${name ? `: ${name}` : ''}\n线程ID: ${selected.id}\n下一条普通消息将继续该会话。\n\n${context}`,
     handled: true,
   };
 }

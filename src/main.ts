@@ -226,7 +226,9 @@ async function handleMessage(
 
     const result: CommandResult = routeCommand(ctx);
     if (result.reply) {
-      await sender.sendText(fromUserId, contextToken, result.reply);
+      for (const chunk of splitMessage(result.reply)) {
+        await sender.sendText(fromUserId, contextToken, chunk);
+      }
       return;
     }
     if (result.codexPrompt) {

@@ -32,14 +32,15 @@ function buildContext(text: string, session?: Partial<Session>) {
   };
 }
 
-function buildCodexHome(cwd: string, sessions: Array<{ id: string; name?: string; updatedAt: string }>): string {
+function buildCodexHome(
+  cwd: string,
+  sessions: Array<{ id: string; name?: string; updatedAt: string; events?: unknown[] }>,
+): string {
   const codexHome = mkdtempSync(join(tmpdir(), 'wcb-command-codex-'));
   const directory = join(codexHome, 'sessions', '2026', '06', '16');
   mkdirSync(directory, { recursive: true });
   for (const session of sessions) {
-    writeFileSync(
-      join(directory, `rollout-${session.id}.jsonl`),
-      `${JSON.stringify({
+    const metadata = {
         type: 'session_meta',
         payload: {
           id: session.id,
@@ -47,8 +48,9 @@ function buildCodexHome(cwd: string, sessions: Array<{ id: string; name?: string
           timestamp: session.updatedAt,
           source: 'cli',
         },
-      })}\n`,
-    );
+      };
+    const events = [metadata, ...(session.events ?? [])];
+    writeFileSync(join(directory, `rollout-${session.id}.jsonl`), events.map((event) => JSON.stringify(event)).join('\n') + '\n');
   }
   writeFileSync(
     join(codexHome, 'session_index.jsonl'),
@@ -119,16 +121,27 @@ test('/resume latest selects the newest session without changing other settings'
   const cwd = mkdtempSync(join(tmpdir(), 'wcb-resume-cwd-'));
   const codexHome = buildCodexHome(cwd, [
     { id: 'session-old', name: 'Old', updatedAt: '2026-06-15T10:00:00.000Z' },
-    { id: 'session-new', name: 'New', updatedAt: '2026-06-16T10:00:00.000Z' },
+    {
+      id: 'session-new',
+      name: 'New',
+      updatedAt: '2026-06-16T10:00:00.000Z',
+      events: [
+        { type: 'event_msg', payload: { type: 'user_message', message: 'previous question' } },
+        { type: 'event_msg', payload: { type: 'agent_message', message: 'previous answer' } },
+      ],
+    },
   ]);
   const ctx = {
     ...buildContext('/resume latest', { workingDirectory: cwd, model: 'gpt-test', mode: 'plan' }),
     codexHome,
   };
-  routeCommand(ctx);
+  const result = routeCommand(ctx);
   assert.equal(ctx.session.threadId, 'session-new');
   assert.equal(ctx.session.model, 'gpt-test');
   assert.equal(ctx.session.mode, 'plan');
+  assert.match(result.reply ?? '', /最近三轮对话/);
+  assert.match(result.reply ?? '', /previous question/);
+  assert.match(result.reply ?? '', /previous answer/);
 });
 
 test('/resume selects a uniquely named session', () => {
@@ -139,6 +152,17 @@ test('/resume selects a uniquely named session', () => {
   const ctx = { ...buildContext('/resume My CLI session', { workingDirectory: cwd }), codexHome };
   routeCommand(ctx);
   assert.equal(ctx.session.threadId, 'session-named');
+});
+
+test('/resume succeeds when no history is displayable', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'wcb-resume-empty-history-'));
+  const codexHome = buildCodexHome(cwd, [
+    { id: 'session-empty', name: 'Empty', updatedAt: '2026-06-16T10:00:00.000Z' },
+  ]);
+  const ctx = { ...buildContext('/resume Empty', { workingDirectory: cwd }), codexHome };
+  const result = routeCommand(ctx);
+  assert.equal(ctx.session.threadId, 'session-empty');
+  assert.match(result.reply ?? '', /未找到可展示的历史对话/);
 });
 
 test('/resume rejects duplicate names and sessions from another directory', () => {

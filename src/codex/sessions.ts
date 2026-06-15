@@ -17,6 +17,18 @@ export interface CodexSessionInfo {
   createdAt: string;
   updatedAt: string;
   source: string;
+  filePath: string;
+}
+
+export interface CodexConversationMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp?: string;
+}
+
+export interface CodexConversationTurn {
+  user?: CodexConversationMessage;
+  assistant?: CodexConversationMessage;
 }
 
 export interface ScanCodexSessionsOptions {
@@ -39,6 +51,8 @@ interface SessionMetadata {
 }
 
 const MAX_METADATA_BYTES = 2 * 1024 * 1024;
+export const DEFAULT_CONTEXT_TURNS = 3;
+export const CONTEXT_MESSAGE_LIMIT = 600;
 
 function readFirstLine(filePath: string): string | undefined {
   const fd = openSync(filePath, 'r');
@@ -175,6 +189,7 @@ export function scanCodexSessions(options: ScanCodexSessionsOptions = {}): Codex
         createdAt,
         updatedAt: newestDate(indexEntry?.updatedAt, statSync(filePath).mtime.toISOString(), createdAt),
         source: sourceName(metadata),
+        filePath,
       });
     } catch {
       // Skip malformed or concurrently removed session files.
@@ -190,4 +205,131 @@ export function sessionsForDirectory(
 ): CodexSessionInfo[] {
   const platform = options.platform ?? process.platform;
   return scanCodexSessions(options).filter((session) => sameSessionPath(session.cwd, cwd, platform));
+}
+
+function extractResponseItemText(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts = content
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const record = item as { text?: unknown; content?: unknown };
+      if (typeof record.text === 'string') return record.text;
+      if (typeof record.content === 'string') return record.content;
+      return '';
+    })
+    .filter(Boolean);
+  const text = parts.join('\n').trim();
+  return text || undefined;
+}
+
+function parseEventMessage(event: unknown): CodexConversationMessage | undefined {
+  if (!event || typeof event !== 'object') return undefined;
+  const record = event as { timestamp?: unknown; type?: unknown; payload?: unknown };
+  if (record.type !== 'event_msg' || !record.payload || typeof record.payload !== 'object') return undefined;
+  const payload = record.payload as { type?: unknown; message?: unknown };
+  if (payload.type !== 'user_message' && payload.type !== 'agent_message') return undefined;
+  if (typeof payload.message !== 'string' || !payload.message.trim()) return undefined;
+  return {
+    role: payload.type === 'user_message' ? 'user' : 'assistant',
+    text: payload.message.trim(),
+    timestamp: typeof record.timestamp === 'string' ? record.timestamp : undefined,
+  };
+}
+
+function parseResponseItemMessage(event: unknown): CodexConversationMessage | undefined {
+  if (!event || typeof event !== 'object') return undefined;
+  const record = event as { timestamp?: unknown; type?: unknown; payload?: unknown };
+  if (record.type !== 'response_item' || !record.payload || typeof record.payload !== 'object') return undefined;
+  const payload = record.payload as { type?: unknown; role?: unknown; content?: unknown };
+  if (payload.type !== 'message' || (payload.role !== 'user' && payload.role !== 'assistant')) return undefined;
+  const text = extractResponseItemText(payload.content);
+  if (!text) return undefined;
+  return {
+    role: payload.role,
+    text,
+    timestamp: typeof record.timestamp === 'string' ? record.timestamp : undefined,
+  };
+}
+
+function groupConversationTurns(messages: CodexConversationMessage[]): CodexConversationTurn[] {
+  const turns: CodexConversationTurn[] = [];
+  for (const message of messages) {
+    if (message.role === 'user') {
+      turns.push({ user: message });
+      continue;
+    }
+
+    const current = turns.at(-1);
+    if (!current?.user) continue;
+    if (current.assistant) {
+      current.assistant = {
+        ...message,
+        text: `${current.assistant.text}\n\n${message.text}`,
+      };
+    } else {
+      current.assistant = message;
+    }
+  }
+  return turns;
+}
+
+export function readRecentConversationTurns(
+  session: Pick<CodexSessionInfo, 'filePath'>,
+  count = DEFAULT_CONTEXT_TURNS,
+): CodexConversationTurn[] {
+  let content: string;
+  try {
+    content = readFileSync(session.filePath, 'utf8');
+  } catch {
+    return [];
+  }
+
+  const eventMessages: CodexConversationMessage[] = [];
+  const responseItemMessages: CodexConversationMessage[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      const eventMessage = parseEventMessage(event);
+      if (eventMessage) {
+        eventMessages.push(eventMessage);
+        continue;
+      }
+      const responseMessage = parseResponseItemMessage(event);
+      if (responseMessage) {
+        responseItemMessages.push(responseMessage);
+      }
+    } catch {
+      // Skip malformed records in otherwise readable rollout files.
+    }
+  }
+
+  const messages = eventMessages.length > 0 ? eventMessages : responseItemMessages;
+  return groupConversationTurns(messages).slice(-count);
+}
+
+export function truncateContextText(text: string, limit = CONTEXT_MESSAGE_LIMIT): string {
+  if (text.length <= limit) return text;
+  const head = text.slice(0, Math.floor(limit / 2));
+  const tail = text.slice(text.length - Math.ceil(limit / 2));
+  return `${head}\n...（中间已隐藏，原文共 ${text.length} 字）...\n${tail}`;
+}
+
+export function formatConversationContext(turns: CodexConversationTurn[]): string {
+  if (turns.length === 0) {
+    return '最近三轮对话：未找到可展示的历史对话。';
+  }
+
+  const lines = ['最近三轮对话：'];
+  turns.forEach((turn, index) => {
+    lines.push('');
+    lines.push(`第 ${index + 1} 轮`);
+    if (turn.user) {
+      lines.push(`你：\n${truncateContextText(turn.user.text)}`);
+    }
+    if (turn.assistant) {
+      lines.push(`Codex：\n${truncateContextText(turn.assistant.text)}`);
+    }
+  });
+  return lines.join('\n');
 }
