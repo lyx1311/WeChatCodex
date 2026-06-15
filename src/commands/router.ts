@@ -1,7 +1,7 @@
 import type { Session } from '../session.js';
 import { findSkill } from '../codex/skill-scanner.js';
 import { logger } from '../logger.js';
-import { handleHelp, handleClear, handleModel, handleMode, handleCwd, handleStatus, handleSkills, handleUnknown, handlePermissionAlias } from './handlers.js';
+import { handleHelp, handleClear, handleModel, handleMode, handleCwd, handleStatus, handleSkills, handleUnknown, handlePermissionAlias, handleThreads, handleResume } from './handlers.js';
 
 export interface CommandContext {
   accountId: string;
@@ -9,6 +9,7 @@ export interface CommandContext {
   updateSession: (partial: Partial<Session>) => void;
   clearSession: () => Session;
   text: string;
+  codexHome?: string;
 }
 
 export interface CommandResult {
@@ -27,6 +28,8 @@ export interface CommandResult {
  *   /cwd <path> - Update the working directory
  *   /mode <mode> - Update execution mode
  *   /status   - Show current session info
+ *   /threads  - List Codex sessions for the current working directory
+ *   /resume <id|name|latest> - Select an existing Codex session
  *   /skills   - List all installed skills
  *   /<skill>  - Invoke a skill by name (args are forwarded to Claude)
  */
@@ -58,6 +61,10 @@ export function routeCommand(ctx: CommandContext): CommandResult {
       return handlePermissionAlias();
     case 'status':
       return handleStatus(ctx);
+    case 'threads':
+      return handleThreads(ctx);
+    case 'resume':
+      return handleResume(ctx, args);
     case 'skills':
       return handleSkills();
     default:

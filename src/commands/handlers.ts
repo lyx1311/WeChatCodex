@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { scanAllSkills, findSkill, type SkillInfo } from '../codex/skill-scanner.js';
+import { sessionsForDirectory, type CodexSessionInfo } from '../codex/sessions.js';
 
 const HELP_TEXT = `可用命令：
 
@@ -12,6 +13,8 @@ const HELP_TEXT = `可用命令：
   /cwd <路径>       切换工作目录
   /mode <模式>      切换执行模式
   /status           查看当前会话状态
+  /threads          列出当前目录的 Codex 会话
+  /resume <ID|名称|latest>  接入已有 Codex 会话
   /skills           列出已安装的 skills
   /<skill> [参数]   触发已安装的 skill
 
@@ -130,6 +133,92 @@ export function handleStatus(ctx: CommandContext): CommandResult {
     `状态: ${s.state}`,
   ];
   return { reply: lines.join('\n'), handled: true };
+}
+
+function cleanSessionName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const singleLine = name.replace(/\s+/g, ' ').trim();
+  if (!singleLine) return undefined;
+  return singleLine.length > 60 ? `${singleLine.slice(0, 57)}...` : singleLine;
+}
+
+function formatSessionTime(timestamp: string): string {
+  return timestamp.replace('T', ' ').slice(0, 16);
+}
+
+function formatSessionSource(source: string): string {
+  if (source === 'cli') return 'CLI';
+  if (source === 'vscode') return 'IDE';
+  return source;
+}
+
+function getDirectorySessions(ctx: CommandContext): CodexSessionInfo[] {
+  return sessionsForDirectory(ctx.session.workingDirectory, { codexHome: ctx.codexHome });
+}
+
+export function handleThreads(ctx: CommandContext): CommandResult {
+  const sessions = getDirectorySessions(ctx);
+  if (sessions.length === 0) {
+    return {
+      reply: `当前工作目录没有可恢复的 Codex 会话。\n${ctx.session.workingDirectory}`,
+      handled: true,
+    };
+  }
+
+  const visible = sessions.slice(0, 10);
+  const lines = visible.map((session, index) => {
+    const name = cleanSessionName(session.name) ?? session.id.slice(0, 8);
+    return `${index + 1}. ${name}\n${formatSessionTime(session.updatedAt)} | ${formatSessionSource(session.source)}\n${session.id}`;
+  });
+  if (sessions.length > visible.length) {
+    lines.push(`仅显示最近 ${visible.length} 个，共 ${sessions.length} 个。`);
+  }
+  return {
+    reply: `当前目录的 Codex 会话：\n\n${lines.join('\n\n')}`,
+    handled: true,
+  };
+}
+
+export function handleResume(ctx: CommandContext, args: string): CommandResult {
+  const identifier = args.trim();
+  if (!identifier) {
+    return { reply: '用法: /resume <会话ID|会话名称|latest>', handled: true };
+  }
+
+  const sessions = getDirectorySessions(ctx);
+  let selected: CodexSessionInfo | undefined;
+
+  if (identifier.toLowerCase() === 'latest') {
+    selected = sessions[0];
+  } else {
+    selected = sessions.find((session) => session.id === identifier);
+    if (!selected) {
+      const nameMatches = sessions.filter(
+        (session) => session.name?.localeCompare(identifier, undefined, { sensitivity: 'accent' }) === 0,
+      );
+      if (nameMatches.length > 1) {
+        return {
+          reply: `会话名称重复，请使用完整 ID：\n${nameMatches.map((session) => session.id).join('\n')}`,
+          handled: true,
+        };
+      }
+      selected = nameMatches[0];
+    }
+  }
+
+  if (!selected) {
+    return {
+      reply: `未找到当前工作目录下的会话: ${identifier}\n请运行 /threads 查看可用会话，或使用 /cwd 切换目录。`,
+      handled: true,
+    };
+  }
+
+  ctx.updateSession({ threadId: selected.id });
+  const name = cleanSessionName(selected.name);
+  return {
+    reply: `已接入 Codex 会话${name ? `: ${name}` : ''}\n线程ID: ${selected.id}\n下一条普通消息将继续该会话。`,
+    handled: true,
+  };
 }
 
 export function handleSkills(): CommandResult {

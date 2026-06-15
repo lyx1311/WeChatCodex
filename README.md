@@ -88,6 +88,8 @@ Windows 后台进程不注册系统服务，也不会在开机后自动启动；
 | `/help` | 查看帮助 |
 | `/clear` | 清空当前会话 |
 | `/status` | 查看当前会话状态 |
+| `/threads` | 列出当前工作目录下的本地 Codex 会话 |
+| `/resume <id|name|latest>` | 接入当前工作目录下的已有 Codex 会话 |
 | `/model <name>` | 切换 Codex 模型 |
 | `/cwd <path>` | 切换工作目录 |
 | `/mode <plan|workspace|danger>` | 切换执行模式 |
